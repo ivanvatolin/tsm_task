@@ -1,5 +1,7 @@
 import sqlite3
 import json
+import re
+from string import ascii_letters, whitespace
 import html
 from datetime import datetime
 
@@ -8,6 +10,8 @@ TWEETS_FILE = 'three_minutes_tweets.json.txt'
 AFINN_DICT_FILE = 'AFINN-111.txt'
 
 conn = sqlite3.connect(DB_NAME)
+good_chars = (ascii_letters + whitespace).encode()
+junk_chars = bytearray(set(range(0x100)) - set(good_chars))
 
 
 def drop_table():
@@ -90,7 +94,11 @@ def delete_all_data():
     print("all rows deleted\n")
 
 
-def clean_data(data):
+def clean_text(text):
+    return text.encode('ascii', 'ignore').translate(None, junk_chars).decode().strip().lower()
+
+
+def clean_column(data):
     return html.escape(data.strip())
 
 
@@ -126,7 +134,7 @@ def load_tweet(file_name):
                 display_url = media[0].get('display_url','') if media else ''
                 lang = user.get('lang')
                 location = user.get('location')
-                row = (tweet_id, user_id, clean_data(name), clean_data(tweet_text), clean_data(country_code), clean_data(display_url), clean_data(lang), created_at, clean_data(location))
+                row = (tweet_id, user_id, clean_column(name), clean_column(tweet_text), clean_column(country_code), clean_column(display_url), clean_column(lang), created_at, clean_column(location))
 
                 # вставка записи
                 insert_one_row(row)
@@ -185,7 +193,7 @@ def get_afinn_dict(file_name):
     return dic
 
 
-def calculate_tweet_sentiment(variant=1):
+def calculate_tweet_sentiment(variant=2):
     """
         расчет значений tweet_sentiment
         variant=1 твит бъется на слова и смотрятся в afinn dict (более быстрый)
@@ -202,23 +210,23 @@ def calculate_tweet_sentiment(variant=1):
 
     # проходим по словарю и смотрим вхождение слов в твите
     # сделано 2 варианта
-    try:
-        for rid, tweet_sentiment in cursor.execute("select id, tweet_text from tweet;"):
-            if variant == 1:
+    # try:
+    for rid, tweet_text in cursor.execute("select id, tweet_text from tweet;"):
+        tweet_text = clean_text(tweet_text)
+        if variant == 1:
+            # твит бъется на слова и смотрятся в afinn dict (более быстрый, менее качественный)
+            for word in clean_text(tweet_text).split(' '):
+                word = clean_word(word)
+                if word in afinn_data:
+                    sentiment_dict[rid] = sentiment_dict.get(rid, [])+[afinn_data.get(word)]
+        else:
 
-                # твит бъется на слова и смотрятся в afinn dict (более быстрый)
-                for word in tweet_sentiment.split(' '):
-                    word = clean_word(word)
-                    if word in afinn_data:
-                        sentiment_dict[rid] = sentiment_dict.get(rid, [])+[afinn_data.get(word)]
-            else:
-
-                # проход по afinn dict и смотрятся на вхождение в твите (менее быстрый)
-                for word, val in afinn_data.items():
-                    if word in tweet_sentiment:
-                        sentiment_dict[rid] = sentiment_dict.get(rid, [])+[afinn_data.get(word)]
-    except sqlite3.Error as msg:
-        print("Command skipped: ", msg)
+            # проход по afinn dict и смотрятся на вхождение в твите (менее быстрый, более качественный)
+            for word, val in afinn_data.items():
+                if word in tweet_text:
+                    sentiment_dict[rid] = sentiment_dict.get(rid, [])+[afinn_data.get(word)]
+    # except sqlite3.Error as msg:
+    #     print("Command skipped: ", msg)
 
     # расчитываем средний sentiment
     for rid, values in sentiment_dict.items():
@@ -284,7 +292,6 @@ def main():
     # добавление колонки tweet_sentiment в БД
     add_column_sentiment()
 
-    # ---> запустить файл нормализации normalize.sql
     # select_data(query = """select * from tweet limit 5""")
     # select_data(query = """select * from user limit 5""")
 
@@ -301,6 +308,10 @@ def main():
 
     # закрытие соединения
     conn.close()
+
+    # ---> запустить файл нормализации normalize.sql
+
+    # ---> запустить файл fortunate_country.sql
 
 
 if __name__ == "__main__":
