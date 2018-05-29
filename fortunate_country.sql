@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
    SELECT t1.name,
           t1.lang,
           t1.location,
